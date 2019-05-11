@@ -1,0 +1,16 @@
+{
+	"authors": [
+		"Cameron"
+	],
+	"copyright": "Copyright © 2019, Cameron",
+	"description": "vIRC daemon",
+	"license": "proprietary",
+	"name": "vircd",
+	"dependencies": {
+		"virc": "*",
+		"vibe-d:core": "~>0.8.0",
+		"vibe-d:http": "~>0.8.0",
+		"vibe-d:stream": "~>0.8.0",
+		"vibe-d:tls": "~>0.8.0"
+	}
+}
