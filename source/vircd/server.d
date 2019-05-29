@@ -137,6 +137,9 @@ struct VIRCd {
 				}
 				break;
 			case "USER":
+				if (thisClient.registered) {
+					break;
+				}
 				auto args = msg.args;
 				thisClient.mask.ident = args.front;
 				args.popFront();
@@ -153,6 +156,9 @@ struct VIRCd {
 				cleanup(thisClient.id, msg.args.front);
 				break;
 			case "JOIN":
+				if (!thisClient.registered) {
+					break;
+				}
 				void joinChannel(ref ServerChannel channel) @safe {
 					channel.users ~= thisClient.id;
 					foreach (otherClient; subscribedUsers(Target(Channel(channel.name)))) {
@@ -177,6 +183,9 @@ struct VIRCd {
 				}
 				break;
 			case "PRIVMSG":
+				if (!thisClient.registered) {
+					break;
+				}
 				auto args = msg.args;
 				auto targets = args.front.splitter(",");
 				args.popFront();
@@ -196,6 +205,9 @@ struct VIRCd {
 				}
 				break;
 			case "NOTICE":
+				if (!thisClient.registered) {
+					break;
+				}
 				auto args = msg.args;
 				auto targets = args.front.splitter(",");
 				args.popFront();
