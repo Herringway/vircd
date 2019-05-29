@@ -83,7 +83,7 @@ struct VIRCd {
 		logInfo("User connected: %s/%s", address, clientID);
 
 		while (!stream.empty) {
-			receive(assumeUTF(stream.readUntil(['\r', '\n'], 512)), clientID);
+			receive(assumeUTF(stream.readUntil(['\r', '\n'], 512)), client);
 		}
 		cleanup(clientID, "Connection reset by peer");
 	}
@@ -99,7 +99,7 @@ struct VIRCd {
 		logInfo("User connected: %s/%s", address, clientID);
 
 		while (stream.waitForData()) {
-			receive(stream.receiveText(), clientID);
+			receive(stream.receiveText(), client);
 		}
 		cleanup(clientID, "Connection reset by peer");
 	}
@@ -115,28 +115,27 @@ struct VIRCd {
 			}
 		}
 	}
-	void receive(string str, string client) @safe {
+	void receive(string str, ref Client thisClient) @safe {
 		import virc.ircmessage : IRCMessage;
-		auto thisClient = client in connections;
 		auto msg = IRCMessage.fromClient(str);
 		switch(msg.verb) {
 			case "NICK":
 				auto nickname = msg.args.front;
 				auto currentNickname = thisClient.mask.nickname;
 				if (auto alreadyUsed = getUserByNickname(nickname)) {
-					if (alreadyUsed !is thisClient) {
-						sendERRNicknameInUse(*thisClient, nickname);
+					if (alreadyUsed.id != thisClient.id) {
+						sendERRNicknameInUse(thisClient, nickname);
 						break;
 					}
 				}
 				if (thisClient.registered) {
 					foreach (otherClient; subscribedUsers(Target(User(currentNickname)))) {
-						sendNickChange(*otherClient, *thisClient, nickname);
+						sendNickChange(*otherClient, thisClient, nickname);
 					}
 				}
 				thisClient.mask.nickname = nickname;
 				if (!thisClient.registered && thisClient.meetsRegistrationRequirements) {
-					completeRegistration(*thisClient);
+					completeRegistration(thisClient);
 				}
 				break;
 			case "USER":
@@ -149,32 +148,32 @@ struct VIRCd {
 				args.popFront();
 				thisClient.realname = args.front;
 				if (!thisClient.registered && thisClient.meetsRegistrationRequirements) {
-					completeRegistration(*thisClient);
+					completeRegistration(thisClient);
 				}
 				break;
 			case "QUIT":
-				cleanup(client, msg.args.front);
+				cleanup(thisClient.id, msg.args.front);
 				break;
 			case "JOIN":
 				void joinChannel(ref ServerChannel channel) @safe {
-					channel.users ~= client;
+					channel.users ~= thisClient.id;
 					foreach (otherClient; subscribedUsers(Target(Channel(channel.name)))) {
-						sendJoin(*otherClient, *thisClient, channel.name);
+						sendJoin(*otherClient, thisClient, channel.name);
 					}
-					sendNames(*thisClient, channel);
+					sendNames(thisClient, channel);
 				}
 				auto channelsToJoin = msg.args.front.splitter(",");
 				foreach (channel; channelsToJoin) {
-					final switch (couldUserJoin(*thisClient, channel)) {
+					final switch (couldUserJoin(thisClient, channel)) {
 						case JoinAttemptResult.yes:
 							if (channel[0] != '#') {
 								channel = "#"~channel;
 							}
-							logTrace("%s joining channel %s", client, channel);
+							logTrace("%s joining channel %s", thisClient.id, channel);
 							joinChannel(channels.require(channel, ServerChannel(channel)));
 							break;
 						case JoinAttemptResult.illegalChannel:
-							sendERRNoSuchChannel(*thisClient, channel);
+							sendERRNoSuchChannel(thisClient, channel);
 							continue;
 					}
 				}
@@ -186,12 +185,12 @@ struct VIRCd {
 				auto message = args.front;
 				foreach (target; targets) {
 					if (auto user = getUserByNickname(target)) {
-						sendPrivmsg(*user, *thisClient, target, message);
+						sendPrivmsg(*user, thisClient, target, message);
 					} else {
 						if (target in channels) {
 							foreach (otherClient; subscribedUsers(Target(Channel(channels[target].name)))) {
-								if (otherClient !is thisClient) {
-									sendPrivmsg(*otherClient, *thisClient, target, message);
+								if (otherClient.id != thisClient.id) {
+									sendPrivmsg(*otherClient, thisClient, target, message);
 								}
 							}
 						}
@@ -205,12 +204,12 @@ struct VIRCd {
 				auto message = args.front;
 				foreach (target; targets) {
 					if (auto user = getUserByNickname(target)) {
-						sendNotice(*user, *thisClient, target, message);
+						sendNotice(*user, thisClient, target, message);
 					} else {
 						if (target in channels) {
 							foreach (otherClient; subscribedUsers(Target(Channel(channels[target].name)))) {
-								if (otherClient !is thisClient) {
-									sendNotice(*otherClient, *thisClient, target, message);
+								if (otherClient.id != thisClient.id) {
+									sendNotice(*otherClient, thisClient, target, message);
 								}
 							}
 						}
