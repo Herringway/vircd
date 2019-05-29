@@ -78,7 +78,6 @@ struct VIRCd {
 		auto clientID = uniform!ulong().text;
 		auto client = Client(clientID, stream);
 		client.defaultHost = address;
-		connections[clientID] = client;
 
 		logInfo("User connected: %s/%s", address, clientID);
 
@@ -94,7 +93,6 @@ struct VIRCd {
 		auto clientID = uniform!ulong().text;
 		auto client = Client(clientID, stream);
 		client.defaultHost = address;
-		connections[clientID] = client;
 
 		logInfo("User connected: %s/%s", address, clientID);
 
@@ -221,9 +219,13 @@ struct VIRCd {
 				break;
 		}
 	}
-	void completeRegistration(ref Client client) @safe {
+	void completeRegistration(ref Client client) @safe
+		in(client.meetsRegistrationRequirements, "Client does not meet registration requirements yet")
+		in(!client.registered, "Client already registered")
+	{
 		client.mask.host = client.defaultHost;
 		client.registered = true;
+		connections[client.id] = client;
 		sendRPLWelcome(client);
 		sendRPLYourHost(client);
 		sendRPLCreated(client);
