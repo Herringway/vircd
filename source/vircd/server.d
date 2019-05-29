@@ -385,3 +385,9 @@ struct VIRCd {
 		return JoinAttemptResult.yes;
 	}
 }
+
+@safe unittest {
+	auto ircd = VIRCd();
+	ircd.init();
+	ircd.addChannel("#test");
+}
