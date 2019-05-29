@@ -11,43 +11,39 @@ import virc;
 
 struct Client {
 	string id;
-	Stream stream;
-	WebSocket webSocket;
+	Stream[] streams;
+	WebSocket[] webSockets;
 	SysTime connected;
 	string defaultHost;
 	UserMask mask;
 	string realname;
 	bool registered;
+	bool isAnonymous;
 	this(string clientID, Stream userStream) @safe {
 		id = clientID;
-		stream = userStream;
+		streams ~= userStream;
 		connected = Clock.currTime;
 	}
 	this(string clientID, WebSocket socket) @safe {
 		id = clientID;
-		webSocket = socket;
+		webSockets ~= socket;
 		connected = Clock.currTime;
 	}
 	void send(const IRCMessage message) @safe {
 		logTrace("Sending message: %s", message.toString());
-		if (webSocket) {
+		foreach (webSocket; webSockets) {
 			webSocket.send(message.toString());
 		}
-		if (stream) {
+		foreach (stream; streams) {
 			stream.write(message.toString());
 			stream.write("\r\n");
 		}
 	}
-	void disconnect() @safe {
-		if (webSocket) {
-			webSocket.close();
-		}
-		if (stream) {
-			stream.finalize();
-		}
-	}
 	bool meetsRegistrationRequirements() @safe const {
 		return ((mask.ident != "") && (mask.nickname != ""));
+	}
+	bool shouldCleanup() @safe const {
+		return isAnonymous && streams.length ==0 && webSockets.length == 0;
 	}
 }
 
@@ -109,12 +105,13 @@ struct VIRCd {
 	}
 	void cleanup(string id, string message) @safe {
 		if (id in connections) {
-			foreach (otherClient; subscribedUsers(Target(User(connections[id].mask.nickname)))) {
-				sendQuit(*otherClient, connections[id], message);
-			}
-			connections[id].disconnect();
-			if (!connections.remove(id)) {
-				logTrace("Could not remove ID from connection list?");
+			if (connections[id].shouldCleanup) {
+				foreach (otherClient; subscribedUsers(Target(User(connections[id].mask.nickname)))) {
+					sendQuit(*otherClient, connections[id], message);
+				}
+				if (!connections.remove(id)) {
+					logTrace("Could not remove ID from connection list?");
+				}
 			}
 		}
 	}
