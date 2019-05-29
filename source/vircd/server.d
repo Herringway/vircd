@@ -252,8 +252,7 @@ struct VIRCd {
 					result ~= client in connections;
 				}
 			}
-		}
-		if (target.isUser) {
+		} else if (target.isUser) {
 			string id;
 			foreach (client; connections) {
 				if (client.mask.nickname == target.targetText) {
