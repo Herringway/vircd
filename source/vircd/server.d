@@ -10,6 +10,7 @@ import vibe.stream.operations;
 import virc : IRCMessage, Target, UserMask, VIRCChannel = Channel, VIRCUser = User;
 
 struct Client {
+	string id;
 	Stream stream;
 	WebSocket webSocket;
 	bool sentUSER;
@@ -49,21 +50,22 @@ struct Client {
 		}
 	}
 	bool meetsRegistrationRequirements() @safe const {
-		return sentUSER && sentNICK;
+		return sentUSER && sentNICK && !waitForCapEnd;
 	}
 }
 
 struct User {
-	string id;
-	Client[] clients;
+	string randomID;
+	string account;
+	Client[string] clients;
 	SysTime connected;
 	string defaultHost;
 	UserMask mask;
 	string realname;
-	bool isAnonymous;
+	bool isAnonymous = true;
 	this(string userID, Client client) @safe {
-		id = userID;
-		clients ~= client;
+		randomID = userID;
+		clients[userID] = client;
 		connected = Clock.currTime;
 	}
 	void send(const IRCMessage message) @safe {
@@ -77,6 +79,9 @@ struct User {
 	auto accountID() @safe const {
 		assert(!isAnonymous, "Anonymous users don't have accounts");
 		return id;
+	}
+	auto id() @safe const {
+		return isAnonymous ? randomID : account;
 	}
 }
 
@@ -114,19 +119,26 @@ struct VIRCd {
 	void handleStream(Client client, string address) @safe {
 		import std.conv : text;
 		import std.random : uniform;
-		auto userID = uniform!ulong().text;
-		auto user = User(userID, client);
+		auto randomID = uniform!ulong().text;
+		client.id = randomID;
+		auto user = new User(randomID, client);
 		user.defaultHost = address;
 
-		logInfo("User connected: %s/%s", address, userID);
+		logInfo("User connected: %s/%s", address, randomID);
 
 		while (client.hasMoreData) {
-			receive(client.receive(), user, client);
+			receive(client.receive(), *user, client);
+			if (user.id != randomID) {
+				user = user.id in connections;
+				client = user.clients[randomID];
+			}
 		}
-		cleanup(userID, "Connection reset by peer");
+		cleanup(user.id, randomID, "Connection reset by peer");
 	}
-	void cleanup(string id, string message) @safe {
+	void cleanup(string id, string clientID, string message) @safe {
+		logInfo("Client disconnected: %s: %s", id, message);
 		if (id in connections) {
+			connections[id].clients.remove(clientID);
 			if (connections[id].shouldCleanup) {
 				foreach (otherUser; subscribedUsers(Target(VIRCUser(connections[id].mask.nickname)))) {
 					sendQuit(*otherUser, connections[id], message);
@@ -179,7 +191,7 @@ struct VIRCd {
 				}
 				break;
 			case "QUIT":
-				cleanup(thisUser.id, msg.args.front);
+				cleanup(thisUser.id, thisClient.id, msg.args.front);
 				break;
 			case "JOIN":
 				if (!thisClient.registered) {
@@ -263,8 +275,8 @@ struct VIRCd {
 	{
 		user.mask.host = user.defaultHost;
 		client.registered = true;
-		user = connections.require(user.id, user);
-		user.clients ~= client;
+		connections.require(user.id, user);
+		connections[user.id].clients[user.randomID] = client;
 		sendRPLWelcome(client, user.mask.nickname);
 		sendRPLYourHost(client, user.mask.nickname);
 		sendRPLCreated(client, user.mask.nickname);
