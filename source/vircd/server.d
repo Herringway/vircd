@@ -80,7 +80,7 @@ struct User {
 	}
 }
 
-struct ServerChannel {
+struct Channel {
 	string name;
 	SysTime created;
 	string topic;
@@ -93,7 +93,7 @@ struct ServerChannel {
 
 struct VIRCd {
 	User[string] connections;
-	ServerChannel[string] channels;
+	Channel[string] channels;
 	string networkName = "Unnamed";
 	string serverName = "Unknown";
 	string serverVersion = "v0.0.0";
@@ -185,7 +185,7 @@ struct VIRCd {
 				if (!thisClient.registered) {
 					break;
 				}
-				void joinChannel(ref ServerChannel channel) @safe {
+				void joinChannel(ref Channel channel) @safe {
 					channel.users ~= thisUser.id;
 					foreach (otherUser; subscribedUsers(Target(VIRCChannel(channel.name)))) {
 						sendJoin(*otherUser, thisUser, channel.name);
@@ -200,7 +200,7 @@ struct VIRCd {
 								channel = "#"~channel;
 							}
 							logDebugV("%s joining channel %s", thisUser.id, channel);
-							joinChannel(channels.require(channel, ServerChannel(channel)));
+							joinChannel(channels.require(channel, Channel(channel)));
 							break;
 						case JoinAttemptResult.illegalChannel:
 							sendERRNoSuchChannel(thisUser, channel);
@@ -299,7 +299,7 @@ struct VIRCd {
 		}
 		return result;
 	}
-	void sendNames(ref User user, const ServerChannel channel) @safe {
+	void sendNames(ref User user, const Channel channel) @safe {
 		sendRPLNamreply(user, channel);
 		sendRPLEndOfNames(user, channel.name);
 	}
@@ -363,7 +363,7 @@ struct VIRCd {
 		import std.format : format;
 		sendNumeric(client, nickname, 5, "are supported by this server");
 	}
-	void sendRPLNamreply(ref User user, const ServerChannel channel) @safe {
+	void sendRPLNamreply(ref User user, const Channel channel) @safe {
 		import std.algorithm.iteration : map;
 		import std.format : format;
 		sendNumeric(user, 353, ["=", channel.name, format!"%-(%s %)"(channel.users.map!(x => connections[x].mask.nickname))]);
