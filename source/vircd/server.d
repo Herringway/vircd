@@ -33,7 +33,7 @@ struct Client {
 		}
 	}
 	void send(const IRCMessage message) @safe {
-		logTrace("Sending message: %s", message.toString());
+		logDebugV("Sending message: %s", message.toString());
 		if (usingWebSocket) {
 			webSocket.send(message.toString());
 		} else {
@@ -138,7 +138,7 @@ struct VIRCd {
 					sendQuit(*otherUser, connections[id], message);
 				}
 				if (!connections.remove(id)) {
-					logTrace("Could not remove ID from connection list?");
+					logWarn("Could not remove ID from connection list?");
 				}
 			}
 		}
@@ -205,7 +205,7 @@ struct VIRCd {
 							if (channel[0] != '#') {
 								channel = "#"~channel;
 							}
-							logTrace("%s joining channel %s", thisUser.id, channel);
+							logDebugV("%s joining channel %s", thisUser.id, channel);
 							joinChannel(channels.require(channel, ServerChannel(channel)));
 							break;
 						case JoinAttemptResult.illegalChannel:

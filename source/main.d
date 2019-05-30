@@ -36,7 +36,6 @@ void setupWebSocket(ref VIRCd instance) {
 }
 
 void main() {
-	setLogLevel(LogLevel.trace);
 	VIRCd instance;
 	instance.init();
 	runTask({
