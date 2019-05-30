@@ -61,12 +61,6 @@ struct User {
 	UserMask mask;
 	string realname;
 	bool isAnonymous;
-	this(string userID, Stream userStream) @safe {
-		this(userID, Client(userStream));
-	}
-	this(string userID, WebSocket socket) @safe {
-		this(userID, Client(socket));
-	}
 	this(string userID, Client client) @safe {
 		id = userID;
 		clients ~= client;
