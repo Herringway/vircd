@@ -9,6 +9,8 @@ import vibe.stream.operations;
 
 import virc : IRCMessage, Target, UserMask, VIRCChannel = Channel, VIRCUser = User;
 
+enum maxLineLength = 510;
+
 struct Client {
 	string id;
 	Stream stream;
@@ -17,6 +19,9 @@ struct Client {
 	bool sentNICK;
 	bool registered;
 	bool usingWebSocket;
+	bool waitForCapEnd;
+	bool supportsCap302;
+	bool supportsCapNotify;
 	this(WebSocket socket) @safe {
 		usingWebSocket = true;
 		webSocket = socket;
@@ -97,13 +102,16 @@ struct Channel {
 }
 
 struct VIRCd {
+	import virc.ircv3.base : Capability;
 	User[string] connections;
 	Channel[string] channels;
 	string networkName = "Unnamed";
 	string serverName = "Unknown";
 	string serverVersion = "v0.0.0";
 	string networkAddress = "localhost";
-	string[] supportedCaps = ["SASL"];
+	Capability[] supportedCaps = [
+		Capability("cap-notify", "")
+	];
 	SysTime serverCreatedTime;
 
 	void init() @safe {
@@ -147,12 +155,69 @@ struct VIRCd {
 					logWarn("Could not remove ID from connection list?");
 				}
 			}
+		} else {
+			logWarn("ID of user not found");
 		}
 	}
 	void receive(string str, ref User thisUser, ref Client thisClient) @safe {
+		import std.algorithm.iteration : map;
+		import std.algorithm.searching : canFind;
 		import virc.ircmessage : IRCMessage;
 		auto msg = IRCMessage.fromClient(str);
 		switch(msg.verb) {
+			case "CAP":
+				auto args = msg.args;
+				if (args.empty) {
+					break;
+				}
+				const subCommand = args.front;
+				args.popFront();
+				switch (subCommand) {
+					case "LS":
+						if (!args.empty && args.front == "302") {
+							thisClient.supportsCap302 = true;
+						}
+						thisClient.waitForCapEnd = true;
+						sendCapList(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", "LS");
+						break;
+					case "LIST":
+						sendCapList(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", "LIST");
+						break;
+					case "REQ":
+						Capability[] caps;
+						bool reject;
+						foreach (clientCap; args.front.splitter(" ").map!(x => Capability(x))) {
+							if (!supportedCaps.canFind(clientCap.name)) {
+								reject = true;
+								break;
+							}
+							caps ~= clientCap;
+						}
+						if (reject) {
+							sendCapNAK(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", args.front);
+						} else {
+							sendCapACK(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", args.front);
+						}
+						foreach (cap; caps) {
+							switch (cap) {
+								case "cap-notify":
+									thisClient.supportsCapNotify = !cap.isDisabled;
+									break;
+								default: assert(0, "Unsupported CAP ACKed???");
+							}
+						}
+						break;
+					case "END":
+						thisClient.waitForCapEnd = false;
+						if (!thisClient.registered && thisClient.meetsRegistrationRequirements) {
+							completeRegistration(thisClient, thisUser);
+						}
+						break;
+					default:
+						sendERRInvalidCapCmd(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", subCommand);
+					break;
+				}
+				break;
 			case "NICK":
 				auto nickname = msg.args.front;
 				auto currentNickname = thisUser.mask.nickname;
@@ -356,6 +421,78 @@ struct VIRCd {
 		ircMessage.args = [target, message];
 		user.send(ircMessage);
 	}
+	void sendCapList(ref Client client, string nickname, string subCommand) @safe {
+		import std.array : empty;
+		import std.algorithm.iteration : map;
+		import std.string : join;
+		auto capsToSend = supportedCaps;
+		const capLengthLimit = maxLineLength - (networkAddress.length + 2) - "CAP ".length - (nickname.length + 1) - (subCommand.length + 3);
+		do {
+			size_t thisLength = 0;
+			size_t numCaps;
+			auto ircMessage = IRCMessage();
+			ircMessage.source = networkAddress;
+			ircMessage.verb = "CAP";
+			foreach (i, cap; capsToSend) {
+				thisLength += cap.name.length + 1;
+				if (client.supportsCap302) {
+					thisLength += cap.value.length+1;
+				}
+				if (thisLength > capLengthLimit) {
+					assert(i > 0, "CAP name way too long");
+					numCaps = i;
+					break;
+				}
+				if (i == capsToSend.length-1) {
+					numCaps = i + 1;
+					break;
+				}
+			}
+			string[] args;
+			args.reserve(4);
+			args ~= [nickname, subCommand];
+			assert((capsToSend.length == 0) || (numCaps > 0), "Unexpectedly sending zero caps");
+			if (client.supportsCap302) {
+				if (numCaps < capsToSend.length) {
+					args ~= "*";
+				}
+				args ~= capsToSend[0 .. numCaps].map!(x => x.toString).join(" ");
+			} else {
+				args ~= capsToSend[0 .. numCaps].map!(x => x.name).join(" ");
+			}
+			ircMessage.args = args;
+			client.send(ircMessage);
+			capsToSend = capsToSend[numCaps .. $];
+		} while(!capsToSend.empty);
+	}
+	void sendCapACK(ref Client client, string nickname, string capList) @safe {
+		auto ircMessage = IRCMessage();
+		ircMessage.source = networkAddress;
+		ircMessage.verb = "CAP";
+		ircMessage.args = [nickname, "ACK", capList];
+		client.send(ircMessage);
+	}
+	void sendCapNAK(ref Client client, string nickname, string capList) @safe {
+		auto ircMessage = IRCMessage();
+		ircMessage.source = networkAddress;
+		ircMessage.verb = "CAP";
+		ircMessage.args = [nickname, "NAK", capList];
+		client.send(ircMessage);
+	}
+	void sendCapNEW(ref User user, string capList) @safe {
+		auto ircMessage = IRCMessage();
+		ircMessage.source = networkAddress;
+		ircMessage.verb = "CAP";
+		ircMessage.args = [user.mask.nickname, "NEW", capList];
+		user.send(ircMessage);
+	}
+	void sendCapDEL(ref User user, string capList) @safe {
+		auto ircMessage = IRCMessage();
+		ircMessage.source = networkAddress;
+		ircMessage.verb = "CAP";
+		ircMessage.args = [user.mask.nickname, "NEW", capList];
+		user.send(ircMessage);
+	}
 	void sendRPLWelcome(ref Client client, const string nickname) @safe {
 		import std.format : format;
 		sendNumeric(client, nickname, 1, format!"Welcome to the %s Network, %s"(networkName, nickname));
@@ -388,6 +525,10 @@ struct VIRCd {
 	void sendERRNoSuchChannel(ref User user, string channel) @safe {
 		import std.format : format;
 		sendNumeric(user, 403, [channel, "No such channel"]);
+	}
+	void sendERRInvalidCapCmd(ref Client client, const string nickname, string cmd) @safe {
+		import std.format : format;
+		sendNumeric(client, nickname, 410, [cmd, "Invalid CAP command"]);
 	}
 	void sendERRNicknameInUse(ref User user, string nickname) @safe {
 		import std.format : format;
