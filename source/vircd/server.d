@@ -263,7 +263,8 @@ struct VIRCd {
 	{
 		user.mask.host = user.defaultHost;
 		client.registered = true;
-		connections.require(user.id, user);
+		user = connections.require(user.id, user);
+		user.clients ~= client;
 		sendRPLWelcome(client, user.mask.nickname);
 		sendRPLYourHost(client, user.mask.nickname);
 		sendRPLCreated(client, user.mask.nickname);
