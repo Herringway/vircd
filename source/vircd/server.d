@@ -222,9 +222,9 @@ struct VIRCd {
 							caps ~= clientCap;
 						}
 						if (reject) {
-							sendCapNAK(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", args.front);
+							thisClient.send(createCapNAK(thisClient.registered ? thisUser.mask.nickname : "*", args.front));
 						} else {
-							sendCapACK(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", args.front);
+							thisClient.send(createCapACK(thisClient.registered ? thisUser.mask.nickname : "*", args.front));
 						}
 						foreach (cap; caps) {
 							switch (cap) {
@@ -247,7 +247,7 @@ struct VIRCd {
 						}
 						break;
 					default:
-						sendERRInvalidCapCmd(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", subCommand);
+						thisClient.send(createERRInvalidCapCmd(thisClient.registered ? thisUser.mask.nickname : "*", subCommand));
 					break;
 				}
 				break;
@@ -267,19 +267,19 @@ struct VIRCd {
 						if (thisClient.isAuthenticating) {
 							auto decoded = Base64.decode(subCommand).splitter(0);
 							if (decoded.empty) {
-								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
 								break;
 							}
 							string authcid = cast(string)decoded.front.idup;
 							decoded.popFront();
 							if (decoded.empty) {
-								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
 								break;
 							}
 							string authzid = cast(string)decoded.front.idup;
 							decoded.popFront();
 							if (decoded.empty) {
-								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
 								break;
 							}
 							string password = cast(string)decoded.front.idup;
@@ -293,14 +293,14 @@ struct VIRCd {
 							if (correct) {
 								thisUser.account = account;
 								thisUser.isAnonymous = false;
-								sendRPLLoggedIn(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", thisUser.mask, account);
-								sendRPLSASLSuccess(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								thisClient.send(createRPLLoggedIn(thisClient.registered ? thisUser.mask.nickname : "*", thisUser.mask, account));
+								thisClient.send(createRPLSASLSuccess(thisClient.registered ? thisUser.mask.nickname : "*"));
 							} else {
-								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
 							}
 							thisClient.isAuthenticating = false;
 						} else {
-							sendRPLSASLMechs(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+							thisClient.send(createRPLSASLMechs(thisClient.registered ? thisUser.mask.nickname : "*"));
 						}
 						break;
 				}
@@ -310,7 +310,7 @@ struct VIRCd {
 				auto currentNickname = thisUser.mask.nickname;
 				if (auto alreadyUsed = getUserByNickname(nickname)) {
 					if (alreadyUsed.id != thisUser.id) {
-						sendERRNicknameInUse(thisUser, nickname);
+						thisClient.send(createERRNicknameInUse(thisClient.registered ? thisUser.mask.nickname : "*", nickname));
 						break;
 					}
 				}
@@ -363,7 +363,7 @@ struct VIRCd {
 							joinChannel(channels.require(channel, Channel(channel)));
 							break;
 						case JoinAttemptResult.illegalChannel:
-							sendERRNoSuchChannel(thisUser, channel);
+							thisClient.send(createERRNoSuchChannel(thisClient.registered ? thisUser.mask.nickname : "*", channel));
 							continue;
 					}
 				}
@@ -412,11 +412,11 @@ struct VIRCd {
 		client.registered = true;
 		connections.require(user.id, user);
 		connections[user.id].clients[user.randomID] = client;
-		sendRPLWelcome(client, user.mask.nickname);
-		sendRPLYourHost(client, user.mask.nickname);
-		sendRPLCreated(client, user.mask.nickname);
-		sendRPLMyInfo(client, user.mask.nickname);
-		sendRPLISupport(client, user.mask.nickname);
+		client.send(createRPLWelcome(user.mask.nickname));
+		client.send(createRPLYourHost(user.mask.nickname));
+		client.send(createRPLCreated(user.mask.nickname));
+		client.send(createRPLMyInfo(user.mask.nickname));
+		client.send(createRPLISupport(user.mask.nickname));
 		foreach (channel; channels) {
 			if (!channel.users.canFind(user.id)) {
 				continue;
@@ -461,8 +461,8 @@ struct VIRCd {
 		return result;
 	}
 	void sendNames(ref Client client, const string nickname, const Channel channel) @safe {
-		sendRPLNamreply(client, nickname, channel);
-		sendRPLEndOfNames(client, nickname, channel.name);
+		client.send(createRPLNamreply(nickname, channel));
+		client.send(createRPLEndOfNames(nickname, channel.name));
 	}
 	auto createMessage(const User subject, string verb, string[] args...) @safe {
 		return createMessage(subject.asVIRCUser, verb, args);
@@ -531,89 +531,89 @@ struct VIRCd {
 			capsToSend = capsToSend[numCaps .. $];
 		} while(!capsToSend.empty);
 	}
-	void sendCapACK(ref Client client, string nickname, string capList) @safe {
-		client.send(createMessage(networkUser, "CAP", nickname, "ACK", capList));
+	auto createCapACK(string nickname, string capList) @safe {
+		return createMessage(networkUser, "CAP", nickname, "ACK", capList);
 	}
-	void sendCapNAK(ref Client client, string nickname, string capList) @safe {
-		client.send(createMessage(networkUser, "CAP", nickname, "NAK", capList));
+	auto createCapNAK(string nickname, string capList) @safe {
+		return createMessage(networkUser, "CAP", nickname, "NAK", capList);
 	}
-	void sendCapNEW(ref User user, string capList) @safe {
-		user.send(createMessage(networkUser, "CAP", user.mask.nickname, "NEW", capList));
+	auto createCapNEW(string nickname, string capList) @safe {
+		return createMessage(networkUser, "CAP", nickname, "NEW", capList);
 	}
-	void sendCapDEL(ref User user, string capList) @safe {
-		user.send(createMessage(networkUser, "CAP", user.mask.nickname, "DEL", capList));
+	auto createCapDEL(string nickname, string capList) @safe {
+		return createMessage(networkUser, "CAP", nickname, "DEL", capList);
 	}
-	void sendRPLWelcome(ref Client client, const string nickname) @safe {
+	auto createRPLWelcome(const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 1, format!"Welcome to the %s Network, %s"(networkName, nickname));
+		return createNumeric(nickname, 1, format!"Welcome to the %s Network, %s"(networkName, nickname));
 	}
-	void sendRPLYourHost(ref Client client, const string nickname) @safe {
+	auto createRPLYourHost(const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 2, format!"Your host is %s, running version %s"(serverName, serverVersion));
+		return createNumeric(nickname, 2, format!"Your host is %s, running version %s"(serverName, serverVersion));
 	}
-	void sendRPLCreated(ref Client client, const string nickname) @safe {
+	auto createRPLCreated(const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 3, format!"This server was created %s"(serverCreatedTime));
+		return createNumeric(nickname, 3, format!"This server was created %s"(serverCreatedTime));
 	}
-	void sendRPLMyInfo(ref Client client, const string nickname) @safe {
+	auto createRPLMyInfo(const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 4, serverName, serverVersion, userModes, channelModes);
+		return createNumeric(nickname, 4, serverName, serverVersion, userModes, channelModes);
 	}
-	void sendRPLISupport(ref Client client, const string nickname) @safe {
+	auto createRPLISupport(const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 5, "are supported by this server");
+		return createNumeric(nickname, 5, "are supported by this server");
 	}
-	void sendRPLNamreply(ref Client user, const string nickname, const Channel channel) @safe {
+	auto createRPLNamreply(const string nickname, const Channel channel) @safe {
 		import std.algorithm.iteration : map;
 		import std.format : format;
-		sendNumeric(user, nickname, 353, ["=", channel.name, format!"%-(%s %)"(channel.users.map!(x => connections[x].mask.nickname))]);
+		return createNumeric(nickname, 353, ["=", channel.name, format!"%-(%s %)"(channel.users.map!(x => connections[x].mask.nickname))]);
 	}
-	void sendRPLEndOfNames(ref Client user, const string nickname, string channel) @safe {
-		sendNumeric(user, nickname, 366, [channel, "End of /NAMES list"]);
+	auto createRPLEndOfNames(const string nickname, string channel) @safe {
+		return createNumeric(nickname, 366, [channel, "End of /NAMES list"]);
 	}
-	void sendRPLLoggedIn(ref Client user, const string nickname,  UserMask mask, string account) @safe {
+	auto createRPLLoggedIn(const string nickname,  UserMask mask, string account) @safe {
 		import std.conv : text;
-		sendNumeric(user, nickname, 900, mask.text, account, "You are now logged in as "~account);
+		return createNumeric(nickname, 900, mask.text, account, "You are now logged in as "~account);
 	}
-	void sendRPLSASLSuccess(ref Client user, const string nickname) @safe {
+	auto createRPLSASLSuccess(const string nickname) @safe {
 		import std.conv : text;
-		sendNumeric(user, nickname, 903, "SASL authentication successful");
+		return createNumeric(nickname, 903, "SASL authentication successful");
 	}
-	void sendERRSASLFail(ref Client user, const string nickname) @safe {
+	auto createERRSASLFail(const string nickname) @safe {
 		import std.conv : text;
-		sendNumeric(user, nickname, 904, "SASL authentication failed");
+		return createNumeric(nickname, 904, "SASL authentication failed");
 	}
-	void sendRPLSASLMechs(ref Client user, const string nickname) @safe {
+	auto createRPLSASLMechs(const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(user, nickname, 908, "PLAIN", "are available SASL mechanisms");
+		return createNumeric(nickname, 908, "PLAIN", "are available SASL mechanisms");
 	}
-	void sendERRNoSuchChannel(ref User user, string channel) @safe {
+	auto createERRNoSuchChannel(const string nickname, string channel) @safe {
 		import std.format : format;
-		sendNumeric(user, 403, [channel, "No such channel"]);
+		return createNumeric(nickname, 403, [channel, "No such channel"]);
 	}
-	void sendERRInvalidCapCmd(ref Client client, const string nickname, string cmd) @safe {
+	auto createERRInvalidCapCmd(const string nickname, string cmd) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 410, [cmd, "Invalid CAP command"]);
+		return createNumeric(nickname, 410, [cmd, "Invalid CAP command"]);
 	}
-	void sendERRNicknameInUse(ref User user, string nickname) @safe {
+	auto createERRNicknameInUse(const string nickname, string newNickname) @safe {
 		import std.format : format;
-		sendNumeric(user, 433, [nickname, "Nickname is already in use"]);
+		return createNumeric(nickname, 433, [newNickname, "Nickname is already in use"]);
 	}
-	void sendNumeric(ref User user, ushort id, string[] args...) @safe {
+	auto createNumeric(ref User user, ushort id, string[] args...) @safe {
 		auto ircMessage = IRCMessage();
 		ircMessage.args = user.mask.nickname~args;
-		sendNumericCommon(user, id, ircMessage);
+		return createNumericCommon(id, ircMessage);
 	}
-	void sendNumeric(ref Client client, const string nickname, ushort id, string[] args...) @safe {
+	auto createNumeric(const string nickname, ushort id, string[] args...) @safe {
 		auto ircMessage = IRCMessage();
 		ircMessage.args = nickname~args;
-		sendNumericCommon(client, id, ircMessage);
+		return createNumericCommon(id, ircMessage);
 	}
-	void sendNumericCommon(T)(ref T target, const ushort id, IRCMessage message) {
+	auto createNumericCommon(const ushort id, IRCMessage message) @safe {
 		import std.format : format;
 		message.sourceUser = networkUser;
 		message.verb = format!"%03d"(id);
-		target.send(message);
+		return message;
 	}
 	void sendToTarget(Target target, const IRCMessage message) @safe {
 		foreach (otherUser; subscribedUsers(target)) {
