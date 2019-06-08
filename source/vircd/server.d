@@ -193,6 +193,9 @@ struct VIRCd {
 		import virc.ircmessage : IRCMessage;
 		auto msg = IRCMessage.fromClient(str);
 		const myNickname = thisClient.registered ? thisUser.mask.nickname : "*";
+		void reply(const IRCMessage msg) {
+			thisClient.send(msg);
+		}
 		switch(msg.verb) {
 			case "CAP":
 				auto args = msg.args;
@@ -223,9 +226,9 @@ struct VIRCd {
 							caps ~= clientCap;
 						}
 						if (reject) {
-							thisClient.send(createCapNAK(myNickname, args.front));
+							reply(createCapNAK(myNickname, args.front));
 						} else {
-							thisClient.send(createCapACK(myNickname, args.front));
+							reply(createCapACK(myNickname, args.front));
 						}
 						foreach (cap; caps) {
 							switch (cap) {
@@ -248,7 +251,7 @@ struct VIRCd {
 						}
 						break;
 					default:
-						thisClient.send(createERRInvalidCapCmd(myNickname, subCommand));
+						reply(createERRInvalidCapCmd(myNickname, subCommand));
 					break;
 				}
 				break;
@@ -261,26 +264,26 @@ struct VIRCd {
 				args.popFront();
 				switch (subCommand) {
 					case "PLAIN":
-						thisClient.send(createMessage(networkUser, "AUTHENTICATE", "+"));
+						reply(createMessage(networkUser, "AUTHENTICATE", "+"));
 						thisClient.isAuthenticating = true;
 						break;
 					default:
 						if (thisClient.isAuthenticating) {
 							auto decoded = Base64.decode(subCommand).splitter(0);
 							if (decoded.empty) {
-								thisClient.send(createERRSASLFail(myNickname));
+								reply(createERRSASLFail(myNickname));
 								break;
 							}
 							string authcid = cast(string)decoded.front.idup;
 							decoded.popFront();
 							if (decoded.empty) {
-								thisClient.send(createERRSASLFail(myNickname));
+								reply(createERRSASLFail(myNickname));
 								break;
 							}
 							string authzid = cast(string)decoded.front.idup;
 							decoded.popFront();
 							if (decoded.empty) {
-								thisClient.send(createERRSASLFail(myNickname));
+								reply(createERRSASLFail(myNickname));
 								break;
 							}
 							string password = cast(string)decoded.front.idup;
@@ -294,14 +297,14 @@ struct VIRCd {
 							if (correct) {
 								thisUser.account = account;
 								thisUser.isAnonymous = false;
-								thisClient.send(createRPLLoggedIn(myNickname, thisUser.mask, account));
-								thisClient.send(createRPLSASLSuccess(myNickname));
+								reply(createRPLLoggedIn(myNickname, thisUser.mask, account));
+								reply(createRPLSASLSuccess(myNickname));
 							} else {
-								thisClient.send(createERRSASLFail(myNickname));
+								reply(createERRSASLFail(myNickname));
 							}
 							thisClient.isAuthenticating = false;
 						} else {
-							thisClient.send(createRPLSASLMechs(myNickname));
+							reply(createRPLSASLMechs(myNickname));
 						}
 						break;
 				}
@@ -311,7 +314,7 @@ struct VIRCd {
 				auto currentNickname = thisUser.mask.nickname;
 				if (auto alreadyUsed = getUserByNickname(nickname)) {
 					if (alreadyUsed.id != thisUser.id) {
-						thisClient.send(createERRNicknameInUse(myNickname, nickname));
+						reply(createERRNicknameInUse(myNickname, nickname));
 						break;
 					}
 				}
@@ -364,7 +367,7 @@ struct VIRCd {
 							joinChannel(channels.require(channel, Channel(channel)));
 							break;
 						case JoinAttemptResult.illegalChannel:
-							thisClient.send(createERRNoSuchChannel(myNickname, channel));
+							reply(createERRNoSuchChannel(myNickname, channel));
 							continue;
 					}
 				}
@@ -395,9 +398,9 @@ struct VIRCd {
 				break;
 			case "PING":
 				if (!msg.args.empty) {
-					thisClient.send(createMessage(thisUser, "PONG", networkUser.text, msg.args.front));
+					reply(createMessage(thisUser, "PONG", networkUser.text, msg.args.front));
 				} else {
-					thisClient.send(createMessage(thisUser, "PONG", networkUser.text));
+					reply(createMessage(thisUser, "PONG", networkUser.text));
 				}
 				break;
 			default:
