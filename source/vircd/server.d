@@ -344,6 +344,19 @@ struct VIRCd {
 					completeRegistration(thisClient, thisUser);
 				}
 				break;
+			case "USERHOST":
+				auto args = msg.args;
+				if (args.empty) {
+					reply(createERRNeedMoreParams(myNickname, msg.verb));
+					break;
+				}
+				auto targets = args.front.splitter(",");
+				foreach (target; targets) {
+					if (auto user = getUserByNickname(target)) {
+						reply(createRPLUserhost(myNickname, *user));
+					}
+				}
+				break;
 			case "QUIT":
 				cleanup(thisUser.id, thisClient.id, msg.args.front);
 				break;
@@ -567,6 +580,17 @@ struct VIRCd {
 		import std.format : format;
 		return createNumeric(nickname, 5, "are supported by this server");
 	}
+	auto createRPLUserhost(const string nickname, const User[] users...) @safe {
+		import std.format : format;
+		string[] args;
+		args.reserve(users.length);
+		foreach (user; users) {
+			bool isAway = false;
+			bool isOper = false;
+			args ~= user.mask.nickname ~ (isOper ? "*" : "") ~ "=" ~ (isAway ? "-" : "+") ~ user.mask.ident ~ "@" ~user.mask.host;
+		}
+		return createNumeric(nickname, 302, args);
+	}
 	auto createRPLNamreply(const string nickname, const Channel channel) @safe {
 		import std.algorithm.iteration : map;
 		import std.format : format;
@@ -602,6 +626,10 @@ struct VIRCd {
 	auto createERRNicknameInUse(const string nickname, string newNickname) @safe {
 		import std.format : format;
 		return createNumeric(nickname, 433, [newNickname, "Nickname is already in use"]);
+	}
+	auto createERRNeedMoreParams(const string nickname, string command) @safe {
+		import std.format : format;
+		return createNumeric(nickname, 461, [command, "Not enough parameters"]);
 	}
 	auto createNumeric(ref User user, ushort id, string[] args...) @safe {
 		auto ircMessage = IRCMessage();
