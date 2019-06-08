@@ -117,12 +117,23 @@ struct Channel {
 	}
 }
 
+struct Settings {
+	Account[] accounts;
+	string networkName = "Unnamed";
+	string serverName = "Unknown";
+	string canonicalAddress = "localhost";
+	ushort tcpPort = 6697;
+	ushort webSocketPort = 8080;
+	string[] webSocketBindAddresses = ["::1", "127.0.0.1"];
+	string[] webSocketPaths = ["/irc"];
+}
+
 struct VIRCd {
 	import virc.ircv3.base : Capability;
 	User[string] connections;
 	Channel[string] channels;
-	string networkName = "Unnamed";
-	string serverName = "Unknown";
+	string networkName = "Null";
+	string serverName = "Null";
 	string serverVersion = "v0.0.0";
 	string networkAddress = "localhost";
 	VIRCUser networkUser;
@@ -139,8 +150,14 @@ struct VIRCd {
 
 	Account[string] accounts;
 
-	void init() @safe {
+	void init(Settings settings) @safe {
 		serverCreatedTime = Clock.currTime;
+		foreach (account; settings.accounts) {
+			accounts[account.id] = account;
+		}
+		networkName = settings.networkName;
+		serverName = settings.serverName;
+		networkAddress = settings.canonicalAddress;
 		networkUser = VIRCUser(networkAddress);
 	}
 
@@ -672,6 +689,6 @@ struct VIRCd {
 
 @safe unittest {
 	auto ircd = VIRCd();
-	ircd.init();
+	ircd.init(Settings());
 	ircd.addChannel("#test");
 }

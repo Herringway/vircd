@@ -11,6 +11,7 @@
 		"vibe-d:core": "~>0.8.0",
 		"vibe-d:http": "~>0.8.0",
 		"vibe-d:stream": "~>0.8.0",
-		"vibe-d:tls": "~>0.8.0"
+		"vibe-d:tls": "~>0.8.0",
+		"siryul": "~>0.5.3"
 	}
 }

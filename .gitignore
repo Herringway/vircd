@@ -17,3 +17,4 @@ vircd-test-*
 *.crt
 *.key
 dub.selections.json
+settings.yml
