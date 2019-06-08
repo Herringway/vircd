@@ -48,6 +48,7 @@ void main() {
 		return;
 	}
 	auto settings = fromFile!(Settings, YAML)("settings.yml");
+	setLogLevel(settings.verboseLogging ? LogLevel.debugV : LogLevel.info);
 	VIRCd instance;
 	instance.init(settings);
 	runTask({

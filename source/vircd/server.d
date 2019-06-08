@@ -126,6 +126,7 @@ struct Settings {
 	ushort webSocketPort = 8080;
 	string[] webSocketBindAddresses = ["::1", "127.0.0.1"];
 	string[] webSocketPaths = ["/irc"];
+	bool verboseLogging = false;
 }
 
 struct VIRCd {
