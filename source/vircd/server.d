@@ -45,7 +45,7 @@ struct Client {
 		}
 	}
 	void send(const IRCMessage message) @safe {
-		logDebugV("Sending message: %s", message.toString());
+		logDebugV("-> %s", message.toString());
 		if (usingWebSocket) {
 			webSocket.send(message.toString());
 		} else {
@@ -209,6 +209,7 @@ struct VIRCd {
 		import std.algorithm.searching : canFind;
 		import std.conv : text;
 		import virc.ircmessage : IRCMessage;
+		logDebugV("<- %s", str);
 		auto msg = IRCMessage.fromClient(str);
 		const myNickname = thisClient.registered ? thisUser.mask.nickname : "*";
 		void reply(const IRCMessage msg) {
