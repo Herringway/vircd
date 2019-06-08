@@ -9,21 +9,21 @@ import vibe.stream.tls;
 
 import vircd.server;
 
-void setupSocket(ref VIRCd instance) {
+void setupSocket(ref VIRCd instance) @safe {
 	auto sslctx = createTLSContext(TLSContextKind.server);
 	sslctx.useCertificateChainFile("server.crt");
 	sslctx.usePrivateKeyFile("server.key");
-	listenTCP(6697, delegate void(TCPConnection conn) @trusted nothrow {
+	listenTCP(6697, delegate void(TCPConnection conn) @safe nothrow {
 		try {
 			auto stream = createTLSStream(conn, sslctx);
 			instance.handleStream(stream, conn.remoteAddress.toAddressString);
-		} catch (Throwable e) {
-			logInfo("ERROR: %s", e);
+		} catch (Exception e) {
+			debug logInfo("ERROR: %s", e);
 		}
 	});
 }
 
-void setupWebSocket(ref VIRCd instance) {
+void setupWebSocket(ref VIRCd instance) @safe {
 	import vibe.http.router;
 	auto router = new URLRouter;
 	router.get("/irc", handleWebSockets(delegate void(scope WebSocket socket) {
@@ -35,7 +35,7 @@ void setupWebSocket(ref VIRCd instance) {
 	listenHTTP(settings, router);
 }
 
-void main() {
+void main() @safe {
 	VIRCd instance;
 	instance.init();
 	runTask({
