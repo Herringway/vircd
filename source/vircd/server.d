@@ -145,6 +145,8 @@ struct VIRCd {
 
 		logInfo("User connected: %s/%s", address, randomID);
 
+		scope(exit) cleanup(user.id, randomID, "Connection reset by peer");
+
 		while (client.hasMoreData) {
 			receive(client.receive(), *user, client);
 			if (user.id != randomID) {
@@ -152,7 +154,6 @@ struct VIRCd {
 				client = user.clients[randomID];
 			}
 		}
-		cleanup(user.id, randomID, "Connection reset by peer");
 	}
 	void cleanup(string id, string clientID, string message) @safe {
 		logInfo("Client disconnected: %s: %s", id, message);
