@@ -318,6 +318,13 @@ struct VIRCd {
 					sendToTarget(target, createNotice(thisUser, target, message));
 				}
 				break;
+			case "PING":
+				if (!msg.args.empty) {
+					thisClient.send(createMessage(thisUser, "PONG", networkUser.text, msg.args.front));
+				} else {
+					thisClient.send(createMessage(thisUser, "PONG", networkUser.text));
+				}
+				break;
 			default:
 				logInfo("Unhandled verb '%s' with args %s", msg.verb, msg.args);
 				break;
