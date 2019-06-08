@@ -1,6 +1,7 @@
 module vircd.server;
 
 import std.datetime.systime;
+import std.base64 : Base64;
 
 import vibe.core.log;
 import vibe.core.stream;
@@ -23,6 +24,7 @@ struct Client {
 	bool supportsCap302;
 	bool supportsCapNotify;
 	bool supportsEcho;
+	bool isAuthenticating;
 	this(WebSocket socket) @safe {
 		usingWebSocket = true;
 		webSocket = socket;
@@ -96,6 +98,12 @@ struct User {
 	}
 }
 
+struct Account {
+	string id;
+	// this is wildly insecure, hooray
+	string password;
+}
+
 struct Channel {
 	string name;
 	SysTime created;
@@ -118,11 +126,16 @@ struct VIRCd {
 	VIRCUser networkUser;
 	string modePrefixes = "@%+";
 	string channelPrefixes = "#";
+	string userModes;
+	string channelModes;
 	Capability[] supportedCaps = [
 		Capability("cap-notify", ""),
 		Capability("echo-message", ""),
+		Capability("sasl", "PLAIN")
 	];
 	SysTime serverCreatedTime;
+
+	Account[string] accounts;
 
 	void init() @safe {
 		serverCreatedTime = Clock.currTime;
@@ -140,8 +153,10 @@ struct VIRCd {
 		import std.random : uniform;
 		auto randomID = uniform!ulong().text;
 		client.id = randomID;
+		string lastID = randomID;
 		auto user = new User(randomID, client);
 		user.defaultHost = address;
+		user.mask.host = address;
 
 		logInfo("User connected: %s/%s", address, randomID);
 
@@ -149,9 +164,10 @@ struct VIRCd {
 
 		while (client.hasMoreData) {
 			receive(client.receive(), *user, client);
-			if (user.id != randomID) {
+			if (client.registered && (user.id != lastID)) {
 				user = user.id in connections;
 				client = user.clients[randomID];
+				lastID = user.id;
 			}
 		}
 	}
@@ -172,6 +188,7 @@ struct VIRCd {
 	void receive(string str, ref User thisUser, ref Client thisClient) @safe {
 		import std.algorithm.iteration : map;
 		import std.algorithm.searching : canFind;
+		import std.conv : text;
 		import virc.ircmessage : IRCMessage;
 		auto msg = IRCMessage.fromClient(str);
 		switch(msg.verb) {
@@ -216,6 +233,8 @@ struct VIRCd {
 								case "echo-message":
 									thisClient.supportsEcho = !cap.isDisabled;
 									break;
+								case "sasl":
+									break;
 								default: assert(0, "Unsupported CAP ACKed???");
 							}
 						}
@@ -229,6 +248,60 @@ struct VIRCd {
 					default:
 						sendERRInvalidCapCmd(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", subCommand);
 					break;
+				}
+				break;
+			case "AUTHENTICATE":
+				auto args = msg.args;
+				if (args.empty) {
+					break;
+				}
+				const subCommand = args.front;
+				args.popFront();
+				switch (subCommand) {
+					case "PLAIN":
+						thisClient.send(createMessage(networkUser, "AUTHENTICATE", "+"));
+						thisClient.isAuthenticating = true;
+						break;
+					default:
+						if (thisClient.isAuthenticating) {
+							auto decoded = Base64.decode(subCommand).splitter(0);
+							if (decoded.empty) {
+								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								break;
+							}
+							string authcid = cast(string)decoded.front.idup;
+							decoded.popFront();
+							if (decoded.empty) {
+								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								break;
+							}
+							string authzid = cast(string)decoded.front.idup;
+							decoded.popFront();
+							if (decoded.empty) {
+								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+								break;
+							}
+							string password = cast(string)decoded.front.idup;
+							string account = authzid;
+							bool correct;
+							if (auto acc = account in accounts) {
+								if (acc.password == password) {
+									correct = true;
+								}
+							}
+							if (correct) {
+								thisUser.account = account;
+								thisUser.isAnonymous = false;
+								sendRPLLoggedIn(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", thisUser.mask, account);
+								sendRPLSASLSuccess(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+							} else {
+								sendERRSASLFail(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+							}
+							thisClient.isAuthenticating = false;
+						} else {
+							sendRPLSASLMechs(thisClient, thisClient.registered ? thisUser.mask.nickname : "*");
+						}
+						break;
 				}
 				break;
 			case "NICK":
@@ -276,7 +349,7 @@ struct VIRCd {
 				void joinChannel(ref Channel channel) @safe {
 					channel.users ~= thisUser.id;
 					sendToTarget(Target(VIRCChannel(channel.name)), createJoin(thisUser, channel.name));
-					sendNames(thisUser, channel);
+					sendNames(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", channel);
 				}
 				auto channelsToJoin = msg.args.front.splitter(",");
 				foreach (channel; channelsToJoin) {
@@ -334,7 +407,7 @@ struct VIRCd {
 		in(client.meetsRegistrationRequirements, "Client does not meet registration requirements yet")
 		in(!client.registered, "Client already registered")
 	{
-		user.mask.host = user.defaultHost;
+		import std.algorithm.searching : canFind;
 		client.registered = true;
 		connections.require(user.id, user);
 		connections[user.id].clients[user.randomID] = client;
@@ -343,6 +416,16 @@ struct VIRCd {
 		sendRPLCreated(client, user.mask.nickname);
 		sendRPLMyInfo(client, user.mask.nickname);
 		sendRPLISupport(client, user.mask.nickname);
+		foreach (channel; channels) {
+			if (!channel.users.canFind(user.id)) {
+				continue;
+			}
+			client.send(createJoin(user, channel.name));
+			sendNames(client, user.mask.nickname, channel);
+		}
+		if (user.mask.nickname != connections[user.id].mask.nickname) {
+			client.send(createNickChange(user, connections[user.id].mask.nickname));
+		}
 	}
 	auto subscribedUsers(const Target target) @safe {
 		import std.algorithm.searching : canFind;
@@ -369,13 +452,16 @@ struct VIRCd {
 						}
 					}
 				}
+				if (result.length == 0) {
+					result ~= id in connections;
+				}
 			}
 		}
 		return result;
 	}
-	void sendNames(ref User user, const Channel channel) @safe {
-		sendRPLNamreply(user, channel);
-		sendRPLEndOfNames(user, channel.name);
+	void sendNames(ref Client client, const string nickname, const Channel channel) @safe {
+		sendRPLNamreply(client, nickname, channel);
+		sendRPLEndOfNames(client, nickname, channel.name);
 	}
 	auto createMessage(const User subject, string verb, string[] args...) @safe {
 		return createMessage(subject.asVIRCUser, verb, args);
@@ -470,20 +556,35 @@ struct VIRCd {
 	}
 	void sendRPLMyInfo(ref Client client, const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(client, nickname, 4, format!"%s %s %s"(serverName, serverVersion, "abcdefghijklmnopqrstuvwxyz"));
+		sendNumeric(client, nickname, 4, serverName, serverVersion, userModes, channelModes);
 	}
 	void sendRPLISupport(ref Client client, const string nickname) @safe {
 		import std.format : format;
 		sendNumeric(client, nickname, 5, "are supported by this server");
 	}
-	void sendRPLNamreply(ref User user, const Channel channel) @safe {
+	void sendRPLNamreply(ref Client user, const string nickname, const Channel channel) @safe {
 		import std.algorithm.iteration : map;
 		import std.format : format;
-		sendNumeric(user, 353, ["=", channel.name, format!"%-(%s %)"(channel.users.map!(x => connections[x].mask.nickname))]);
+		sendNumeric(user, nickname, 353, ["=", channel.name, format!"%-(%s %)"(channel.users.map!(x => connections[x].mask.nickname))]);
 	}
-	void sendRPLEndOfNames(ref User user, string channel) @safe {
+	void sendRPLEndOfNames(ref Client user, const string nickname, string channel) @safe {
+		sendNumeric(user, nickname, 366, [channel, "End of /NAMES list"]);
+	}
+	void sendRPLLoggedIn(ref Client user, const string nickname,  UserMask mask, string account) @safe {
+		import std.conv : text;
+		sendNumeric(user, nickname, 900, mask.text, account, "You are now logged in as "~account);
+	}
+	void sendRPLSASLSuccess(ref Client user, const string nickname) @safe {
+		import std.conv : text;
+		sendNumeric(user, nickname, 903, "SASL authentication successful");
+	}
+	void sendERRSASLFail(ref Client user, const string nickname) @safe {
+		import std.conv : text;
+		sendNumeric(user, nickname, 904, "SASL authentication failed");
+	}
+	void sendRPLSASLMechs(ref Client user, const string nickname) @safe {
 		import std.format : format;
-		sendNumeric(user, 366, [channel, "End of /NAMES list"]);
+		sendNumeric(user, nickname, 908, "PLAIN", "are available SASL mechanisms");
 	}
 	void sendERRNoSuchChannel(ref User user, string channel) @safe {
 		import std.format : format;
