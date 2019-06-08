@@ -370,45 +370,32 @@ struct VIRCd {
 		sendRPLNamreply(user, channel);
 		sendRPLEndOfNames(user, channel.name);
 	}
-	auto createNickChange(const User subject, string newNickname) @safe {
-		import std.conv : text;
+	auto createMessage(const User subject, string verb, string[] args...) @safe {
+		return createMessage(subject.asVIRCUser, verb, args);
+	}
+	auto createMessage(const VIRCUser subject, string verb, string[] args...) @safe {
 		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = subject.asVIRCUser;
-		ircMessage.verb = "NICK";
-		ircMessage.args = newNickname;
+		ircMessage.sourceUser = subject;
+		ircMessage.verb = verb;
+		ircMessage.args = args;
 		return ircMessage;
+	}
+	auto createNickChange(const User subject, string newNickname) @safe {
+		return createMessage(subject, "NICK", newNickname);
 	}
 	auto createJoin(ref User subject, string channel) @safe {
-		import std.conv : text;
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = subject.asVIRCUser;
-		ircMessage.verb = "JOIN";
-		ircMessage.args = channel;
-		return ircMessage;
+		return createMessage(subject, "JOIN", channel);
 	}
 	auto createQuit(ref User subject, string msg) @safe {
-		import std.conv : text;
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = subject.asVIRCUser;
-		ircMessage.verb = "QUIT";
-		ircMessage.args = msg;
-		return ircMessage;
+		return createMessage(subject, "QUIT", msg);
 	}
 	auto createPrivmsg(ref User subject, Target target, string message) @safe {
 		import std.conv : text;
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = subject.asVIRCUser;
-		ircMessage.verb = "PRIVMSG";
-		ircMessage.args = [target.text, message];
-		return ircMessage;
+		return createMessage(subject, "PRIVMSG", target.text, message);
 	}
 	auto createNotice(ref User subject, Target target, string message) @safe {
 		import std.conv : text;
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = subject.asVIRCUser;
-		ircMessage.verb = "NOTICE";
-		ircMessage.args = [target.text, message];
-		return ircMessage;
+		return createMessage(subject, "NOTICE", target.text, message);
 	}
 	void sendCapList(ref Client client, string nickname, string subCommand) @safe {
 		import std.array : empty;
@@ -419,9 +406,6 @@ struct VIRCd {
 		do {
 			size_t thisLength = 0;
 			size_t numCaps;
-			auto ircMessage = IRCMessage();
-			ircMessage.sourceUser = networkUser;
-			ircMessage.verb = "CAP";
 			foreach (i, cap; capsToSend) {
 				thisLength += cap.name.length + 1;
 				if (client.supportsCap302) {
@@ -449,38 +433,21 @@ struct VIRCd {
 			} else {
 				args ~= capsToSend[0 .. numCaps].map!(x => x.name).join(" ");
 			}
-			ircMessage.args = args;
-			client.send(ircMessage);
+			client.send(createMessage(networkUser, "CAP", args));
 			capsToSend = capsToSend[numCaps .. $];
 		} while(!capsToSend.empty);
 	}
 	void sendCapACK(ref Client client, string nickname, string capList) @safe {
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = networkUser;
-		ircMessage.verb = "CAP";
-		ircMessage.args = [nickname, "ACK", capList];
-		client.send(ircMessage);
+		client.send(createMessage(networkUser, "CAP", nickname, "ACK", capList));
 	}
 	void sendCapNAK(ref Client client, string nickname, string capList) @safe {
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = networkUser;
-		ircMessage.verb = "CAP";
-		ircMessage.args = [nickname, "NAK", capList];
-		client.send(ircMessage);
+		client.send(createMessage(networkUser, "CAP", nickname, "NAK", capList));
 	}
 	void sendCapNEW(ref User user, string capList) @safe {
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = networkUser;
-		ircMessage.verb = "CAP";
-		ircMessage.args = [user.mask.nickname, "NEW", capList];
-		user.send(ircMessage);
+		user.send(createMessage(networkUser, "CAP", user.mask.nickname, "NEW", capList));
 	}
 	void sendCapDEL(ref User user, string capList) @safe {
-		auto ircMessage = IRCMessage();
-		ircMessage.sourceUser = networkUser;
-		ircMessage.verb = "CAP";
-		ircMessage.args = [user.mask.nickname, "NEW", capList];
-		user.send(ircMessage);
+		user.send(createMessage(networkUser, "CAP", user.mask.nickname, "DEL", capList));
 	}
 	void sendRPLWelcome(ref Client client, const string nickname) @safe {
 		import std.format : format;
