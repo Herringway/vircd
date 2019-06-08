@@ -192,6 +192,7 @@ struct VIRCd {
 		import std.conv : text;
 		import virc.ircmessage : IRCMessage;
 		auto msg = IRCMessage.fromClient(str);
+		const myNickname = thisClient.registered ? thisUser.mask.nickname : "*";
 		switch(msg.verb) {
 			case "CAP":
 				auto args = msg.args;
@@ -206,10 +207,10 @@ struct VIRCd {
 							thisClient.supportsCap302 = true;
 						}
 						thisClient.waitForCapEnd = true;
-						sendCapList(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", "LS");
+						sendCapList(thisClient, myNickname, "LS");
 						break;
 					case "LIST":
-						sendCapList(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", "LIST");
+						sendCapList(thisClient, myNickname, "LIST");
 						break;
 					case "REQ":
 						Capability[] caps;
@@ -222,9 +223,9 @@ struct VIRCd {
 							caps ~= clientCap;
 						}
 						if (reject) {
-							thisClient.send(createCapNAK(thisClient.registered ? thisUser.mask.nickname : "*", args.front));
+							thisClient.send(createCapNAK(myNickname, args.front));
 						} else {
-							thisClient.send(createCapACK(thisClient.registered ? thisUser.mask.nickname : "*", args.front));
+							thisClient.send(createCapACK(myNickname, args.front));
 						}
 						foreach (cap; caps) {
 							switch (cap) {
@@ -247,7 +248,7 @@ struct VIRCd {
 						}
 						break;
 					default:
-						thisClient.send(createERRInvalidCapCmd(thisClient.registered ? thisUser.mask.nickname : "*", subCommand));
+						thisClient.send(createERRInvalidCapCmd(myNickname, subCommand));
 					break;
 				}
 				break;
@@ -267,19 +268,19 @@ struct VIRCd {
 						if (thisClient.isAuthenticating) {
 							auto decoded = Base64.decode(subCommand).splitter(0);
 							if (decoded.empty) {
-								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
+								thisClient.send(createERRSASLFail(myNickname));
 								break;
 							}
 							string authcid = cast(string)decoded.front.idup;
 							decoded.popFront();
 							if (decoded.empty) {
-								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
+								thisClient.send(createERRSASLFail(myNickname));
 								break;
 							}
 							string authzid = cast(string)decoded.front.idup;
 							decoded.popFront();
 							if (decoded.empty) {
-								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
+								thisClient.send(createERRSASLFail(myNickname));
 								break;
 							}
 							string password = cast(string)decoded.front.idup;
@@ -293,14 +294,14 @@ struct VIRCd {
 							if (correct) {
 								thisUser.account = account;
 								thisUser.isAnonymous = false;
-								thisClient.send(createRPLLoggedIn(thisClient.registered ? thisUser.mask.nickname : "*", thisUser.mask, account));
-								thisClient.send(createRPLSASLSuccess(thisClient.registered ? thisUser.mask.nickname : "*"));
+								thisClient.send(createRPLLoggedIn(myNickname, thisUser.mask, account));
+								thisClient.send(createRPLSASLSuccess(myNickname));
 							} else {
-								thisClient.send(createERRSASLFail(thisClient.registered ? thisUser.mask.nickname : "*"));
+								thisClient.send(createERRSASLFail(myNickname));
 							}
 							thisClient.isAuthenticating = false;
 						} else {
-							thisClient.send(createRPLSASLMechs(thisClient.registered ? thisUser.mask.nickname : "*"));
+							thisClient.send(createRPLSASLMechs(myNickname));
 						}
 						break;
 				}
@@ -310,7 +311,7 @@ struct VIRCd {
 				auto currentNickname = thisUser.mask.nickname;
 				if (auto alreadyUsed = getUserByNickname(nickname)) {
 					if (alreadyUsed.id != thisUser.id) {
-						thisClient.send(createERRNicknameInUse(thisClient.registered ? thisUser.mask.nickname : "*", nickname));
+						thisClient.send(createERRNicknameInUse(myNickname, nickname));
 						break;
 					}
 				}
@@ -350,7 +351,7 @@ struct VIRCd {
 				void joinChannel(ref Channel channel) @safe {
 					channel.users ~= thisUser.id;
 					sendToTarget(Target(VIRCChannel(channel.name)), createJoin(thisUser, channel.name));
-					sendNames(thisClient, thisClient.registered ? thisUser.mask.nickname : "*", channel);
+					sendNames(thisClient, myNickname, channel);
 				}
 				auto channelsToJoin = msg.args.front.splitter(",");
 				foreach (channel; channelsToJoin) {
@@ -363,7 +364,7 @@ struct VIRCd {
 							joinChannel(channels.require(channel, Channel(channel)));
 							break;
 						case JoinAttemptResult.illegalChannel:
-							thisClient.send(createERRNoSuchChannel(thisClient.registered ? thisUser.mask.nickname : "*", channel));
+							thisClient.send(createERRNoSuchChannel(myNickname, channel));
 							continue;
 					}
 				}
