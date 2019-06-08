@@ -25,13 +25,16 @@ struct Client {
 	bool supportsCapNotify;
 	bool supportsEcho;
 	bool isAuthenticating;
-	this(WebSocket socket) @safe {
+	string address;
+	this(WebSocket socket, string addr) @safe {
 		usingWebSocket = true;
 		webSocket = socket;
+		address = addr;
 	}
-	this(Stream socket) @safe {
+	this(Stream socket, string addr) @safe {
 		usingWebSocket = false;
 		stream = socket;
+		address = addr;
 	}
 	string receive() @safe {
 		import std.string : assumeUTF;
@@ -67,7 +70,6 @@ struct User {
 	string account;
 	Client[string] clients;
 	SysTime connected;
-	string defaultHost;
 	UserMask mask;
 	string realname;
 	bool isAnonymous = true;
@@ -143,22 +145,21 @@ struct VIRCd {
 	}
 
 	void handleStream(Stream stream, string address) @safe {
-		handleStream(Client(stream), address);
+		handleStream(Client(stream, address));
 	}
 	void handleStream(WebSocket stream, string address) @safe {
-		handleStream(Client(stream), address);
+		handleStream(Client(stream, address));
 	}
-	void handleStream(Client client, string address) @safe {
+	void handleStream(Client client) @safe {
 		import std.conv : text;
 		import std.random : uniform;
 		auto randomID = uniform!ulong().text;
 		client.id = randomID;
 		string lastID = randomID;
 		auto user = new User(randomID, client);
-		user.defaultHost = address;
-		user.mask.host = address;
+		user.mask.host = client.address;
 
-		logInfo("User connected: %s/%s", address, randomID);
+		logInfo("User connected: %s/%s", client.address, randomID);
 
 		scope(exit) cleanup(user.id, randomID, "Connection reset by peer");
 
